@@ -76,7 +76,7 @@ static void init(void)
 }
 
 static void step12(void (*outer)(cdouble*, cdouble*),
-	void (*inner)(cdouble*, cdouble*), void (*inner2)(cdouble*, cdouble*))
+		void (*inner)(cdouble*, cdouble*), void (*inner2)(cdouble*, cdouble*))
 {
 	cdouble *p, *q;
 
@@ -165,7 +165,7 @@ int main(void)
 {
 	init();
 
-	for(char *out = buf; ; out = buf + 4) {
+	for (char *out = buf; ; out = buf + 4) {
 		puts(out);
 
 		step12(step1_outer, step1_inner, step1_inner2);
