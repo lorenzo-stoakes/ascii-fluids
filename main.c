@@ -4,11 +4,11 @@
 #include <stdbool.h>
 #include <string.h>
 
-#define PARTICLE_BUFFER_SIZE 19538
-#define OUTPUT_BUFFER_SIZE   6856
+#define WIDTH 80
+#define HEIGHT 25
+#define PARTICLE_BUFFER_SIZE (WIDTH * HEIGHT)
 #define FRAME_SLEEP_NANO     12321
-#define FILL_RANGE_SIZE      2003
-#define LOOKUP               " '`-.|//,\\|\\_\\/#\n"
+#define LOOKUP               " '`-.|//,\\|\\_\\/#"
 
 // See https://en.wikipedia.org/wiki/ANSI_escape_code#Sequence_elements
 #define ANSI_SEQUENCE(__code)      "\x1b[" __code
@@ -18,12 +18,15 @@
 #define ANSI_CLEAR_LENGTH          4
 #define ANSI_PROLOGUE_LENGTH       10
 
+// Add extra column to account for newlines.
+#define OUTPUT_BUFFER_SIZE   (ANSI_PROLOGUE_LENGTH + PARTICLE_BUFFER_SIZE + HEIGHT )
+
 #define FN_OUTER(__name) void (*__name)(particle_t*)
 #define FN_INNER(__name) void (*__name)(cdouble_t, double, particle_t*, particle_t*)
 
 // User-definable constants.
 
-// Gravity
+// Gravity - multiple of 10 ms^-2.
 #ifndef G
 #define G 1
 #endif
@@ -152,49 +155,113 @@ static void update_particle_dynamics(particle_t *particles, int len)
 	calc(particles, len, apply_gravity, update_force);
 }
 
-static void zero_buffer_range(char *buf)
+// Convert buffer particle flags to ASCII characters and insert newlines in the
+// right places.
+static void buffer_to_ascii(char *buf)
 {
-	memset(buf + ANSI_PROLOGUE_LENGTH, 0, FILL_RANGE_SIZE);
-}
-
-static void format_buffer_range(char *buf)
-{
-	for (int i = 0; i < FILL_RANGE_SIZE; i++) {
+	for (int i = 0; i < OUTPUT_BUFFER_SIZE - ANSI_PROLOGUE_LENGTH - 1; i++) {
 		int j = i + ANSI_PROLOGUE_LENGTH;
 
-		int old = buf[j];
-
-		if ((i + 1) % 80 == 0)
+		if ((i + 1) % WIDTH == 0) {
 			buf[j] = '\n';
-		else
-			buf[j] = LOOKUP[old];
+			continue;
+		}
+
+		int offset = buf[j];
+		buf[j] = LOOKUP[offset];
 	}
 }
 
+// Read len particles and write them to the supplied buffer as ASCII.
 static void write_to_buffer(char *buf, particle_t *particles, int len)
 {
-	zero_buffer_range(buf);
+	// Zero the output buffer other than ANSI prologue so we can set flags
+	// to denote particles and adjacent.
+	memset(buf + ANSI_PROLOGUE_LENGTH, 0, OUTPUT_BUFFER_SIZE -
+		ANSI_PROLOGUE_LENGTH);
 
 	for (int i = 0; i < len; i++) {
 		particle_t *particle = &particles[i];
 
-		// Intentionally truncate.
-		int x = particle->pos * I; // We store -ve, I^2 = -1.
-		int y = particle->pos / 2; // Particle height is 2.
+		int x = -cimag(particle->pos);
+		int y = creal(particle->pos) / 2; // Particle height is 2.
 
-		char *t = &buf[ANSI_PROLOGUE_LENGTH + x + 80 * y];
+		// Particles are of height 2, need to be able to write to bottom
+		// right.
+		if (x < 0 || x >= WIDTH - 1 || y < 0 || y >= HEIGHT - 2)
+			continue;
 
-		if (0 <= x && x < 79 && 0 <= y && y < 23) {
-			t[0] |= 8;
-			t[1] |= 4;
-			t[80] |= 2;
-			t[81] = 1;
-		}
+		int curr = ANSI_PROLOGUE_LENGTH + x + WIDTH * y;
+		int right = curr + 1, below = curr + WIDTH,
+			below_right = below + 1;
+
+		/*
+		 * This code cleverly provides the core of the ASCII animation
+		 * by flipping bits to denote proximity to other particles. The
+		 * carefully chosen different possibilities make for
+		 * graphical-like output:-
+		 *
+		 * Empty Space
+		 *
+		 * 0:  ' '
+		 *
+		 * Adjacent To Particle(s)
+		 *
+		 * 1:  "'" Below Right       ,
+		 *                           '
+		 *
+		 * 2:  '`' Below             ,
+		 *                           .
+		 *
+		 * 3:  '-' Below 2 Particles ,_
+		 *                            -
+		 *
+		 * 4:  '.' Right             ,.
+		 *
+		 * 5:  '|' Right 2 Particles ,
+		 *                           ||
+		 *
+		 * 6:  '/' Right + Below      ,
+		 *                           ,/
+		 *
+		 * 7:  '/' Corner            ,_
+		 *                           |/
+		 * Particle
+		 *
+		 * 8:  ',' Isolated          ,
+		 *
+		 * 9:  '\' Below Right       ,
+		 *                            \
+		 *
+		 * 10: '|' Below             ,
+		 *                           |
+		 *
+		 * 11: '\' Below 2 Particles ,_
+		 *                            \
+		 *
+		 * 12: '_' Right             ,_
+		 *
+		 * 13: '\' Right 2 Particles ,
+		 *                           |\
+		 *
+		 * 14: '/' Right + Below      ,
+		 *                           |/
+		 *
+		 * 15: '#' Corner            ,_
+		 *                           |#
+		 */
+
+		buf[curr] |= 8;
+		buf[right] |= 4;
+		buf[below] |= 2;
+		buf[below_right] = 1;
 	}
 
-	format_buffer_range(buf);
+	buffer_to_ascii(buf);
 }
 
+// Update velocity of all non-wall particles from force and subsequently, their
+// positions.
 static void update_position(particle_t *particles, int len)
 {
 	for (int i = 0; i < len; i++) {
@@ -208,9 +275,9 @@ static void update_position(particle_t *particles, int len)
 	}
 }
 
+// Output buffer, don't clear the screen to avoid flicker.
 static void output_buffer(char *buf)
 {
-	// Skip clear screen.
 	puts(buf + ANSI_CLEAR_LENGTH);
 }
 
@@ -225,16 +292,14 @@ int main(void)
 	puts(buf);
 
 	// Run our simulation forever.
-	while (1) {
+	do {
 		update_particle_dynamics(particles, len);
 
 		write_to_buffer(buf, particles, len);
 		output_buffer(buf);
 
 		update_position(particles, len);
-
-		usleep(FRAME_SLEEP_NANO);
-	}
+	} while (usleep(FRAME_SLEEP_NANO) == 0);
 
 	return 0;
 }
