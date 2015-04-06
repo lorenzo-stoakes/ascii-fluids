@@ -11,8 +11,7 @@ Note that all the text files (extension `.txt`) included in this repo are taken 
 To compile and run this code, run the following:-
 
 ```bash
-gcc -Wall -Werror --std=c99 -O2 -lm -D_DEFAULT_SOURCE -DG=1 -DP=4 -DV=8 main.c -o fluids
-./fluids < inputs/logo.txt # or any source file you prefer.
+make test
 ```
 
 [ioccc]:http://www.ioccc.org/
