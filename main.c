@@ -32,6 +32,15 @@
 typedef double complex cdouble_t;
 
 typedef struct {
+	/*
+	 *
+	 *   *-------> x
+	 *   |
+	 *   |   . (x, y) encoded as y - xI.
+	 *   |
+	 *   v y
+	 *
+	 */
 	cdouble_t pos;
 	bool is_wall;
 	cdouble_t density, force, velocity;
@@ -40,20 +49,39 @@ typedef struct {
 #define FN_OUTER(__name) void (*__name)(particle_t*)
 #define FN_INNER(__name) void (*__name)(cdouble_t, cdouble_t, particle_t*, particle_t*)
 
-static int read_particles(cdouble_t *wp, particle_t *ps)
+/*
+ * Reads ASCII model of particles and barriers to be simulated from stdin.
+ *
+ * Populates ps with particle data and end_pos with the position immediately
+ * after the last character read.
+ *
+ * Returns the number of particles read.
+ *
+ * WARNING: No bounds checking is applied here so the buffer can overrun.
+ */
+static int read_particles(cdouble_t *end_pos, particle_t *ps)
 {
 	cdouble_t pos = 0;
 	int i = 0;
 
+	// Each input character corresponds to a 1x2 entry in our model.
 	for (char chr = getc(stdin); chr != EOF; chr = getc(stdin)) {
-		if (chr <= '\n') {
-			pos = (int)(pos + 2);
+		if (chr == '\n') {
+			// Since input particles are of height 2, newline needs
+			// to increment y by 2.
+			pos += 2;
+			pos = creal(pos);
+
 			continue;
 		}
 
 		if (chr > ' ') {
+			// We've detected an actual particle. We double up the
+			// height to 2.
 			ps[i].pos = pos;
 			ps[i + 1].pos = pos + 1;
+
+			// The # character signifies a 'wall' (solid barrier.)
 			ps[i].is_wall = ps[i + 1].is_wall = (chr == '#');
 
 			i += 2;
@@ -62,7 +90,7 @@ static int read_particles(cdouble_t *wp, particle_t *ps)
 		pos -= I;
 	}
 
-	*wp = pos;
+	*end_pos = pos;
 	return i;
 }
 
@@ -124,7 +152,7 @@ static void calc2(char *buf, particle_t *arr, int len)
 
 		// Intentionally truncate.
 		int x = particle->pos * I; // We store -ve, I^2 = -1.
-		int y = particle->pos / 2;
+		int y = particle->pos / 2; // Particle height is 2.
 
 		char *t = &buf[10 + x + 80 * y];
 
@@ -158,16 +186,16 @@ int main(void)
 {
 	char buf[OUTPUT_BUFFER_SIZE] = ANSI_BUFFER_PROLOGUE;
 	particle_t arr[COMPLEX_BUFFER_SIZE] = { { 0 } };
-	cdouble_t w = 0;
+	cdouble_t end_pos;
 
-	int len = read_particles(&w, arr);
+	int len = read_particles(&end_pos, arr);
 
 	puts(buf);
 	while (1) {
 		puts(buf + 4);
 
-		calc1(arr, len, &w, calc1_1_outer, calc1_1_inner2);
-		calc1(arr, len, &w, calc1_2_outer, calc1_2_inner2);
+		calc1(arr, len, &end_pos, calc1_1_outer, calc1_1_inner2);
+		calc1(arr, len, &end_pos, calc1_2_outer, calc1_2_inner2);
 		zero_buffer_range(buf);
 		calc2(buf, arr, len);
 		format_buffer_range(buf);
