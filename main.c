@@ -65,7 +65,7 @@ typedef struct {
  *
  * WARNING: No bounds checking is applied here so the buffer can overrun.
  */
-static int read_particles(cdouble_t *end_pos, particle_t *ps)
+static int read_particles(particle_t *ps)
 {
 	cdouble_t pos = 0;
 	int i = 0;
@@ -96,14 +96,13 @@ static int read_particles(cdouble_t *end_pos, particle_t *ps)
 		pos -= I;
 	}
 
-	*end_pos = pos;
 	return i;
 }
 
-static void calc(particle_t *particles, int len, cdouble_t *wp, FN_OUTER(outer),
+static cdouble_t calc(particle_t *particles, int len, cdouble_t pos, FN_OUTER(outer),
 		FN_INNER(inner2))
 {
-	cdouble_t d = 0, w = *wp;
+	cdouble_t d = 0;
 
 	for(int i = 0; i < len; i++) {
 		particle_t *particle1 = &particles[i];
@@ -114,14 +113,14 @@ static void calc(particle_t *particles, int len, cdouble_t *wp, FN_OUTER(outer),
 			particle_t *particle2 = &particles[j];
 
 			d = particle1->pos - particle2->pos;
-			w = cabs(d) / 2 - 1;
+			pos = cabs(d) / 2 - 1;
 
-			if ((int)(1 - w) > 0)
-				inner2(d, w, particle1, particle2);
+			if ((int)(1 - pos) > 0)
+				inner2(d, pos, particle1, particle2);
 		}
 	}
 
-	*wp = w;
+	return pos;
 }
 
 static void calc_1_outer(particle_t *p)
@@ -129,9 +128,9 @@ static void calc_1_outer(particle_t *p)
 	p->density = p->is_wall * 9;
 }
 
-static void calc_1_inner2(cdouble_t d, cdouble_t w, particle_t *p, particle_t *q)
+static void calc_1_inner2(cdouble_t d, cdouble_t pos, particle_t *p, particle_t *q)
 {
-	p->density += w * w;
+	p->density += pos * pos;
 }
 
 static void calc_2_outer(particle_t *p)
@@ -139,17 +138,17 @@ static void calc_2_outer(particle_t *p)
 	p->force = G;
 }
 
-static void calc_2_inner2(cdouble_t d, cdouble_t w, particle_t *p, particle_t *q)
+static void calc_2_inner2(cdouble_t d, cdouble_t pos, particle_t *p, particle_t *q)
 {
 	cdouble_t tmp = (3 - p->density - q->density) * d * P +
 		(p->velocity - q->velocity) * V;
-	p->force += w * tmp / p->density;
+	p->force += pos * tmp / p->density;
 }
 
-static void update_particle_dynamics(particle_t *particles, int len, cdouble_t *wp)
+static void update_particle_dynamics(particle_t *particles, int len)
 {
-	calc(particles, len, wp, calc_1_outer, calc_1_inner2);
-	calc(particles, len, wp, calc_2_outer, calc_2_inner2);
+	cdouble_t pos = calc(particles, len, 0, calc_1_outer, calc_1_inner2);
+	calc(particles, len, pos, calc_2_outer, calc_2_inner2);
 }
 
 static void zero_buffer_range(char *buf)
@@ -218,16 +217,15 @@ int main(void)
 {
 	char buf[OUTPUT_BUFFER_SIZE] = ANSI_BUFFER_PROLOGUE;
 	particle_t particles[PARTICLE_BUFFER_SIZE] = { { 0 } };
-	cdouble_t end_pos;
 
-	int len = read_particles(&end_pos, particles);
+	int len = read_particles(particles);
 
 	// Clear screen and reset cursor.
 	puts(buf);
 
 	// Run our simulation forever.
 	while (1) {
-		update_particle_dynamics(particles, len, &end_pos);
+		update_particle_dynamics(particles, len);
 
 		write_to_buffer(buf, particles, len);
 		output_buffer(buf);
