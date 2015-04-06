@@ -1,5 +1,5 @@
 CC=clang
-EXTRA_FLAGS=-D_DEFAULT_SOURCE -DG=1 -DP=4 -DV=8
+EXTRA_FLAGS=-D_DEFAULT_SOURCE
 CFLAGS=-g -pedantic -Wall -Werror --std=c99 -O2 -lm $(EXTRA_FLAGS)
 
 CODE_FILES=$(wildcard *.c *.h Makefile)
