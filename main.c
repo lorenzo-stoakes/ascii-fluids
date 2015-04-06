@@ -7,10 +7,19 @@
 #define COMPLEX_BUFFER_SIZE  19538
 #define OUTPUT_BUFFER_SIZE   6856
 #define FRAME_SLEEP_NANO     12321
-#define FILL_RANGE_OFFSET    10
 #define FILL_RANGE_SIZE      2003
-#define ANSI_BUFFER_PROLOGUE "\x1b[2J\x1b[1;1H     "
 #define LOOKUP               " '`-.|//,\\|\\_\\/#\n"
+
+// See https://en.wikipedia.org/wiki/ANSI_escape_code#Sequence_elements
+#define ANSI_SEQUENCE(__code)      "\x1b[" __code
+#define ANSI_CLEAR                 ANSI_SEQUENCE("2J")
+#define ANSI_MOVE_CURSOR(__n, __m) ANSI_SEQUENCE(#__n ";" #__m "H")
+#define ANSI_BUFFER_PROLOGUE       ANSI_CLEAR ANSI_MOVE_CURSOR(1, 1)
+#define ANSI_CLEAR_LENGTH          4
+#define ANSI_PROLOGUE_LENGTH       10
+
+#define FN_OUTER(__name) void (*__name)(particle_t*)
+#define FN_INNER(__name) void (*__name)(cdouble_t, cdouble_t, particle_t*, particle_t*)
 
 // User-definable constants.
 
@@ -45,9 +54,6 @@ typedef struct {
 	bool is_wall;
 	cdouble_t density, force, velocity;
 } particle_t;
-
-#define FN_OUTER(__name) void (*__name)(particle_t*)
-#define FN_INNER(__name) void (*__name)(cdouble_t, cdouble_t, particle_t*, particle_t*)
 
 /*
  * Reads ASCII model of particles and barriers to be simulated from stdin.
@@ -142,7 +148,7 @@ static void calc1_2_inner2(cdouble_t d, cdouble_t w, particle_t *p, particle_t *
 
 static void zero_buffer_range(char *buf)
 {
-	memset(buf + FILL_RANGE_OFFSET, 0, FILL_RANGE_SIZE);
+	memset(buf + ANSI_PROLOGUE_LENGTH, 0, FILL_RANGE_SIZE);
 }
 
 static void calc2(char *buf, particle_t *arr, int len)
@@ -154,7 +160,7 @@ static void calc2(char *buf, particle_t *arr, int len)
 		int x = particle->pos * I; // We store -ve, I^2 = -1.
 		int y = particle->pos / 2; // Particle height is 2.
 
-		char *t = &buf[10 + x + 80 * y];
+		char *t = &buf[ANSI_PROLOGUE_LENGTH + x + 80 * y];
 
 		particle->velocity += particle->force / 10 * !particle->is_wall;
 		particle->pos += particle->velocity;
@@ -171,7 +177,7 @@ static void calc2(char *buf, particle_t *arr, int len)
 static void format_buffer_range(char *buf)
 {
 	for (int i = 0; i < FILL_RANGE_SIZE; i++) {
-		int j = i + FILL_RANGE_OFFSET;
+		int j = i + ANSI_PROLOGUE_LENGTH;
 
 		int old = buf[j];
 
@@ -190,9 +196,11 @@ int main(void)
 
 	int len = read_particles(&end_pos, arr);
 
+	// Clear screen and reset cursor.
 	puts(buf);
 	while (1) {
-		puts(buf + 4);
+		// Skip clear screen.
+		puts(buf + ANSI_CLEAR_LENGTH);
 
 		calc1(arr, len, &end_pos, calc1_1_outer, calc1_1_inner2);
 		calc1(arr, len, &end_pos, calc1_2_outer, calc1_2_inner2);
