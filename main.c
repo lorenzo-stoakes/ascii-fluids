@@ -19,7 +19,7 @@
 #define ANSI_PROLOGUE_LENGTH       10
 
 #define FN_OUTER(__name) void (*__name)(particle_t*)
-#define FN_INNER(__name) void (*__name)(cdouble_t, cdouble_t, particle_t*, particle_t*)
+#define FN_INNER(__name) void (*__name)(cdouble_t, double, particle_t*, particle_t*)
 
 // User-definable constants.
 
@@ -99,56 +99,57 @@ static int read_particles(particle_t *ps)
 	return i;
 }
 
-static cdouble_t calc(particle_t *particles, int len, cdouble_t pos, FN_OUTER(outer),
-		FN_INNER(inner2))
+static void calc(particle_t *particles, int len, FN_OUTER(update_source),
+		FN_INNER(update_proximate))
 {
-	cdouble_t d = 0;
-
+	// Compare each pair of particles.
 	for(int i = 0; i < len; i++) {
-		particle_t *particle1 = &particles[i];
+		particle_t *from = &particles[i];
 
-		outer(particle1);
+		update_source(from);
 
 		for(int j = 0; j < len; j++) {
-			particle_t *particle2 = &particles[j];
+			particle_t *to = &particles[j];
 
-			d = particle1->pos - particle2->pos;
-			pos = cabs(d) / 2 - 1;
+			cdouble_t delta = from->pos - to->pos;
+			double distance = cabs(delta);
 
-			if ((int)(1 - pos) > 0)
-				inner2(d, pos, particle1, particle2);
+			if (distance <= 2)
+				update_proximate(delta, distance / 2 - 1, from, to);
 		}
 	}
-
-	return pos;
 }
 
-static void calc_1_outer(particle_t *p)
+static void init_density(particle_t *p)
 {
-	p->density = p->is_wall * 9;
+	p->density = p->is_wall ? 9 : 0;
 }
 
-static void calc_1_inner2(cdouble_t d, cdouble_t pos, particle_t *p, particle_t *q)
+static void update_density(cdouble_t delta, double distance, particle_t *from,
+			particle_t *to)
 {
-	p->density += pos * pos;
+	from->density += distance * distance;
 }
 
-static void calc_2_outer(particle_t *p)
+static void apply_gravity(particle_t *p)
 {
 	p->force = G;
 }
 
-static void calc_2_inner2(cdouble_t d, cdouble_t pos, particle_t *p, particle_t *q)
+static void update_force(cdouble_t delta, double distance, particle_t *from,
+			particle_t *to)
 {
-	cdouble_t tmp = (3 - p->density - q->density) * d * P +
-		(p->velocity - q->velocity) * V;
-	p->force += pos * tmp / p->density;
+	cdouble_t velocity_delta = from->velocity - to->velocity;
+	cdouble_t tmp1 = (3 - from->density - to->density);
+
+	cdouble_t tmp2 = tmp1 * delta * P + velocity_delta * V;
+	from->force += distance * tmp2 / from->density;
 }
 
 static void update_particle_dynamics(particle_t *particles, int len)
 {
-	cdouble_t pos = calc(particles, len, 0, calc_1_outer, calc_1_inner2);
-	calc(particles, len, pos, calc_2_outer, calc_2_inner2);
+	calc(particles, len, init_density, update_density);
+	calc(particles, len, apply_gravity, update_force);
 }
 
 static void zero_buffer_range(char *buf)
