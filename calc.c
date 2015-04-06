@@ -1,13 +1,35 @@
 #include "fluids.h"
+#include <math.h>
+/*
+ * Uses Smoothed Particle Hydrodynamics.
+ *
+ * See: https://en.wikipedia.org/wiki/Smoothed-particle_hydrodynamics
+ * See: http://www.ioccc.org/2012/endoh1/hint.html
+ * See: https://software.intel.com/en-us/articles/fluid-simulation-for-video-games-part-15
+ *
+ * To calculate any quantity A at point r, sum over all particles:-
+ *
+ * A(r) = Sum_j(m_j * (A_j / p_j) * W(|r - r_j|, h))
+ *
+ * m_j is the mass of particle j (we assume to be 1.)
+ * p_j is the density of particle j
+ * W is a 'kernel' function.
+ * |r - r_j| is the distance between the particle in question and particle j.
+ * h is 'smoothing' length over which W operates (we assume h = 1.)
+ *
+ */
 
-static void calc(particle_t *particles, int len, FN_OUTER(update_source),
-		FN_INNER(update_proximate))
+static cdouble_t kernel(double distance)
 {
-	// Compare each pair of particles.
+	// TODO: Where is this kernel calculation derived from?
+	return (distance / 2 - 1) * (distance / 2 - 1);
+}
+
+static void pairwise_spline(particle_t *particles, int len,
+			FN_PAIR(update_nearby))
+{
 	for(int i = 0; i < len; i++) {
 		particle_t *from = &particles[i];
-
-		update_source(from);
 
 		for(int j = 0; j < len; j++) {
 			particle_t *to = &particles[j];
@@ -15,43 +37,52 @@ static void calc(particle_t *particles, int len, FN_OUTER(update_source),
 			cdouble_t delta = from->pos - to->pos;
 			double distance = cabs(delta);
 
-			if (distance <= 2)
-				update_proximate(delta, distance / 2 - 1, from, to);
+			if (distance > 2)
+				continue;
+
+			update_nearby(delta, distance, from, to);
 		}
 	}
-}
-
-static void init_density(particle_t *p)
-{
-	p->density = p->is_wall ? 9 : 0;
 }
 
 static void update_density(cdouble_t delta, double distance, particle_t *from,
 			particle_t *to)
 {
-	from->density += distance * distance;
-}
-
-static void apply_gravity(particle_t *p)
-{
-	p->force = G;
+	// p(r) = Sum_j(m_j * (p_j / p_j) * W(|r - r_j|, h))
+	// With m_j assumed to be 1, p_j cancelled out and W == kernel, we
+	// have:-
+	from->density += kernel(distance);
 }
 
 static void update_force(cdouble_t delta, double distance, particle_t *from,
 			particle_t *to)
 {
-	cdouble_t velocity_delta = from->velocity - to->velocity;
-	cdouble_t tmp1 = (3 - from->density - to->density);
+	// TODO: Where does this equation originate from?
+	cdouble_t force = (from->density + to->density - 3) * delta * P -
+		(from->velocity - to->velocity) * V;
 
-	cdouble_t tmp2 = tmp1 * delta * P + velocity_delta * V;
-	from->force += distance * tmp2 / from->density;
+	// F(r) = Sum_j(m_j * (F_j / p_j) * W(|r - r_j|, h))
+	// With m_j assumed to be 1 and W == kernel, we have:-
+	from->force += (force / from->density) * kernel(distance);
+}
+
+static void init_particles(particle_t *particles, int len)
+{
+	for(int i = 0; i < len; i++) {
+		particle_t *particle = &particles[i];
+
+		particle->force = G;
+		particle->density = particle->is_wall ? 9 : 0;
+	}
 }
 
 // Use the magic of Smoothed-particle hydrodynamics.
 void update_particle_dynamics(particle_t *particles, int len)
 {
-	calc(particles, len, init_density, update_density);
-	calc(particles, len, apply_gravity, update_force);
+	init_particles(particles, len);
+
+	pairwise_spline(particles, len, update_density);
+	pairwise_spline(particles, len, update_force);
 }
 
 // Update velocity of all non-wall particles from force and subsequently, their

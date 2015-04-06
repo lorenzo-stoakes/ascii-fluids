@@ -23,8 +23,7 @@
 // Add extra column to account for newlines.
 #define OUTPUT_BUFFER_SIZE   (ANSI_PROLOGUE_LENGTH + PARTICLE_BUFFER_SIZE + HEIGHT )
 
-#define FN_OUTER(__name) void (*__name)(particle_t*)
-#define FN_INNER(__name) void (*__name)(cdouble_t, double, particle_t*, particle_t*)
+#define FN_PAIR(__name) void (*__name)(cdouble_t, double, particle_t*, particle_t*)
 
 // User-definable constants.
 
@@ -35,7 +34,7 @@
 
 // Pressure
 #ifndef P
-#define P 4
+#define P 8
 #endif
 
 // Viscosity
@@ -57,7 +56,8 @@ typedef struct {
 	 */
 	cdouble_t pos;
 	bool is_wall;
-	cdouble_t density, force, velocity;
+	double density;
+	cdouble_t force, velocity;
 } particle_t;
 
 // read.c
