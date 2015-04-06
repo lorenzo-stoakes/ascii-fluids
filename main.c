@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-#define COMPLEX_BUFFER_SIZE  19538
+#define PARTICLE_BUFFER_SIZE 19538
 #define OUTPUT_BUFFER_SIZE   6856
 #define FRAME_SLEEP_NANO     12321
 #define FILL_RANGE_SIZE      2003
@@ -100,18 +100,18 @@ static int read_particles(cdouble_t *end_pos, particle_t *ps)
 	return i;
 }
 
-static void calc1(particle_t *arr, int len, cdouble_t *wp, FN_OUTER(outer),
+static void calc(particle_t *particles, int len, cdouble_t *wp, FN_OUTER(outer),
 		FN_INNER(inner2))
 {
 	cdouble_t d = 0, w = *wp;
 
 	for(int i = 0; i < len; i++) {
-		particle_t *particle1 = &arr[i];
+		particle_t *particle1 = &particles[i];
 
 		outer(particle1);
 
 		for(int j = 0; j < len; j++) {
-			particle_t *particle2 = &arr[j];
+			particle_t *particle2 = &particles[j];
 
 			d = particle1->pos - particle2->pos;
 			w = cabs(d) / 2 - 1;
@@ -124,54 +124,37 @@ static void calc1(particle_t *arr, int len, cdouble_t *wp, FN_OUTER(outer),
 	*wp = w;
 }
 
-static void calc1_1_outer(particle_t *p)
+static void calc_1_outer(particle_t *p)
 {
 	p->density = p->is_wall * 9;
 }
 
-static void calc1_1_inner2(cdouble_t d, cdouble_t w, particle_t *p, particle_t *q)
+static void calc_1_inner2(cdouble_t d, cdouble_t w, particle_t *p, particle_t *q)
 {
 	p->density += w * w;
 }
 
-static void calc1_2_outer(particle_t *p)
+static void calc_2_outer(particle_t *p)
 {
 	p->force = G;
 }
 
-static void calc1_2_inner2(cdouble_t d, cdouble_t w, particle_t *p, particle_t *q)
+static void calc_2_inner2(cdouble_t d, cdouble_t w, particle_t *p, particle_t *q)
 {
 	cdouble_t tmp = (3 - p->density - q->density) * d * P +
 		(p->velocity - q->velocity) * V;
 	p->force += w * tmp / p->density;
 }
 
+static void update_particle_dynamics(particle_t *particles, int len, cdouble_t *wp)
+{
+	calc(particles, len, wp, calc_1_outer, calc_1_inner2);
+	calc(particles, len, wp, calc_2_outer, calc_2_inner2);
+}
+
 static void zero_buffer_range(char *buf)
 {
 	memset(buf + ANSI_PROLOGUE_LENGTH, 0, FILL_RANGE_SIZE);
-}
-
-static void calc2(char *buf, particle_t *arr, int len)
-{
-	for (int i = 0; i < len; i++) {
-		particle_t *particle = &arr[i];
-
-		// Intentionally truncate.
-		int x = particle->pos * I; // We store -ve, I^2 = -1.
-		int y = particle->pos / 2; // Particle height is 2.
-
-		char *t = &buf[ANSI_PROLOGUE_LENGTH + x + 80 * y];
-
-		particle->velocity += particle->force / 10 * !particle->is_wall;
-		particle->pos += particle->velocity;
-
-		if (0 <= x && x < 79 && 0 <= y && y < 23) {
-			t[0] |= 8;
-			t[1] |= 4;
-			t[80] |= 2;
-			t[81] = 1;
-		}
-	}
 }
 
 static void format_buffer_range(char *buf)
@@ -188,25 +171,68 @@ static void format_buffer_range(char *buf)
 	}
 }
 
+static void write_to_buffer(char *buf, particle_t *particles, int len)
+{
+	zero_buffer_range(buf);
+
+	for (int i = 0; i < len; i++) {
+		particle_t *particle = &particles[i];
+
+		// Intentionally truncate.
+		int x = particle->pos * I; // We store -ve, I^2 = -1.
+		int y = particle->pos / 2; // Particle height is 2.
+
+		char *t = &buf[ANSI_PROLOGUE_LENGTH + x + 80 * y];
+
+		if (0 <= x && x < 79 && 0 <= y && y < 23) {
+			t[0] |= 8;
+			t[1] |= 4;
+			t[80] |= 2;
+			t[81] = 1;
+		}
+	}
+
+	format_buffer_range(buf);
+}
+
+static void update_position(particle_t *particles, int len)
+{
+	for (int i = 0; i < len; i++) {
+		particle_t *particle = &particles[i];
+
+		if (particle->is_wall)
+			continue;
+
+		particle->velocity += particle->force / 10;
+		particle->pos += particle->velocity;
+	}
+}
+
+static void output_buffer(char *buf)
+{
+	// Skip clear screen.
+	puts(buf + ANSI_CLEAR_LENGTH);
+}
+
 int main(void)
 {
 	char buf[OUTPUT_BUFFER_SIZE] = ANSI_BUFFER_PROLOGUE;
-	particle_t arr[COMPLEX_BUFFER_SIZE] = { { 0 } };
+	particle_t particles[PARTICLE_BUFFER_SIZE] = { { 0 } };
 	cdouble_t end_pos;
 
-	int len = read_particles(&end_pos, arr);
+	int len = read_particles(&end_pos, particles);
 
 	// Clear screen and reset cursor.
 	puts(buf);
-	while (1) {
-		// Skip clear screen.
-		puts(buf + ANSI_CLEAR_LENGTH);
 
-		calc1(arr, len, &end_pos, calc1_1_outer, calc1_1_inner2);
-		calc1(arr, len, &end_pos, calc1_2_outer, calc1_2_inner2);
-		zero_buffer_range(buf);
-		calc2(buf, arr, len);
-		format_buffer_range(buf);
+	// Run our simulation forever.
+	while (1) {
+		update_particle_dynamics(particles, len, &end_pos);
+
+		write_to_buffer(buf, particles, len);
+		output_buffer(buf);
+
+		update_position(particles, len);
 
 		usleep(FRAME_SLEEP_NANO);
 	}
